@@ -10,8 +10,9 @@ import (
 )
 
 func main() {
-	// Define the hostname flag
+	// Define flags
 	hostname := flag.String("hostname", "", "Hostname to resolve and calculate the CIDR for its IPs")
+	debug := flag.Bool("debug", false, "Enable debug output")
 	flag.Parse()
 
 	var ips []net.IP
@@ -20,31 +21,37 @@ func main() {
 		// Resolve the hostname to IPs
 		resolvedIPs, err := net.LookupIP(*hostname)
 		if err != nil {
-			fmt.Printf("Error resolving hostname %s: %v\n", *hostname, err)
+			fmt.Fprintf(os.Stderr, "Error resolving hostname %s: %v\n", *hostname, err)
 			return
 		}
 		ips = append(ips, resolvedIPs...)
-		fmt.Printf("Resolved IPs for %s: %v\n", *hostname, resolvedIPs)
+		if *debug {
+			debugLog(fmt.Sprintf("Resolved IPs for %s: %v", *hostname, resolvedIPs))
+		}
 	} else {
 		// Read IPs from standard input
-		fmt.Println("Enter IPs, one per line. Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end:")
 		scanner := bufio.NewScanner(os.Stdin)
+		if *debug {
+			debugLog("Enter IPs, one per line. Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end:")
+		}
 		for scanner.Scan() {
 			ip := net.ParseIP(scanner.Text())
 			if ip == nil {
-				fmt.Printf("Invalid IP: %s\n", scanner.Text())
+				if *debug {
+					debugLog(fmt.Sprintf("Invalid IP: %s", scanner.Text()))
+				}
 				continue
 			}
 			ips = append(ips, ip)
 		}
 		if err := scanner.Err(); err != nil {
-			fmt.Printf("Error reading input: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
 			return
 		}
 	}
 
 	if len(ips) == 0 {
-		fmt.Println("No valid IPs provided.")
+		fmt.Fprintf(os.Stderr, "No valid IPs provided.\n")
 		return
 	}
 
@@ -71,9 +78,17 @@ func main() {
 		prefixLen--
 	}
 
-	// Print the largest CIDR block
+	// Print the largest CIDR block to stdout
 	cidr := fmt.Sprintf("%s/%d", minIP.Mask(net.CIDRMask(prefixLen, 32)), prefixLen)
-	fmt.Printf("Largest CIDR block: %s\n", cidr)
+	fmt.Println(cidr)
+}
+
+// debugLog prints debug messages to stderr with a yellow "debug:" prefix
+func debugLog(message string) {
+	// Yellow ANSI color code
+	yellow := "\033[33m"
+	reset := "\033[0m"
+	fmt.Fprintf(os.Stderr, "%sdebug:%s %s\n", yellow, reset, message)
 }
 
 // ipToUint32 converts an IPv4 address to a uint32.
