@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -9,23 +10,37 @@ import (
 )
 
 func main() {
-	// Read IPs from standard input
-	scanner := bufio.NewScanner(os.Stdin)
+	// Define the hostname flag
+	hostname := flag.String("hostname", "", "Hostname to resolve and calculate the CIDR for its IPs")
+	flag.Parse()
+
 	var ips []net.IP
 
-	fmt.Println("Enter IPs, one per line. Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end:")
-	for scanner.Scan() {
-		ip := net.ParseIP(scanner.Text())
-		if ip == nil {
-			fmt.Printf("Invalid IP: %s\n", scanner.Text())
-			continue
+	if *hostname != "" {
+		// Resolve the hostname to IPs
+		resolvedIPs, err := net.LookupIP(*hostname)
+		if err != nil {
+			fmt.Printf("Error resolving hostname %s: %v\n", *hostname, err)
+			return
 		}
-		ips = append(ips, ip)
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Printf("Error reading input: %v\n", err)
-		return
+		ips = append(ips, resolvedIPs...)
+		fmt.Printf("Resolved IPs for %s: %v\n", *hostname, resolvedIPs)
+	} else {
+		// Read IPs from standard input
+		fmt.Println("Enter IPs, one per line. Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end:")
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			ip := net.ParseIP(scanner.Text())
+			if ip == nil {
+				fmt.Printf("Invalid IP: %s\n", scanner.Text())
+				continue
+			}
+			ips = append(ips, ip)
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Printf("Error reading input: %v\n", err)
+			return
+		}
 	}
 
 	if len(ips) == 0 {
