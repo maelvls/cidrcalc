@@ -4,47 +4,35 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sort"
 )
 
 func main() {
-	// Define flags
 	hostname := flag.String("hostname", "", "Hostname to resolve and calculate the CIDR for its IPs")
 	debug := flag.Bool("debug", false, "Enable debug output")
 	flag.Parse()
 
 	var ips []net.IP
+	var err error
 
 	if *hostname != "" {
-		// Resolve the hostname to IPs
-		resolvedIPs, err := net.LookupIP(*hostname)
+		ips, err = resolveHostname(*hostname)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error resolving hostname %s: %v\n", *hostname, err)
 			return
 		}
-		ips = append(ips, resolvedIPs...)
 		if *debug {
-			debugLog(fmt.Sprintf("Resolved IPs for %s: %v", *hostname, resolvedIPs))
+			debugLog(fmt.Sprintf("Resolved IPs for %s: %v", *hostname, ips))
 		}
 	} else {
-		// Read IPs from standard input
-		scanner := bufio.NewScanner(os.Stdin)
 		if *debug {
 			debugLog("Enter IPs, one per line. Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end:")
 		}
-		for scanner.Scan() {
-			ip := net.ParseIP(scanner.Text())
-			if ip == nil {
-				if *debug {
-					debugLog(fmt.Sprintf("Invalid IP: %s", scanner.Text()))
-				}
-				continue
-			}
-			ips = append(ips, ip)
-		}
-		if err := scanner.Err(); err != nil {
+		ips, err = parseIPsFromReader(os.Stdin, *debug)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
 			return
 		}
@@ -55,20 +43,69 @@ func main() {
 		return
 	}
 
+	cidr, err := calculateCIDR(ips)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error calculating CIDR: %v\n", err)
+		return
+	}
+
+	fmt.Println(cidr)
+}
+
+// resolveHostname resolves a hostname to its IP addresses.
+func resolveHostname(hostname string) ([]net.IP, error) {
+	return net.LookupIP(hostname)
+}
+
+// parseIPsFromReader reads IP addresses from an io.Reader, one per line.
+func parseIPsFromReader(reader io.Reader, debug bool) ([]net.IP, error) {
+	var ips []net.IP
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		ip := net.ParseIP(scanner.Text())
+		if ip == nil {
+			if debug {
+				debugLog(fmt.Sprintf("Invalid IP: %s", scanner.Text()))
+			}
+			continue
+		}
+		ips = append(ips, ip)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return ips, nil
+}
+
+// calculateCIDR calculates the smallest CIDR block that contains all given IPs.
+func calculateCIDR(ips []net.IP) (string, error) {
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no IPs provided")
+	}
+
 	// Sort IPs
-	sort.Slice(ips, func(i, j int) bool {
-		return compareIPs(ips[i], ips[j]) < 0
+	sortedIPs := make([]net.IP, len(ips))
+	copy(sortedIPs, ips)
+	sort.Slice(sortedIPs, func(i, j int) bool {
+		return compareIPs(sortedIPs[i], sortedIPs[j]) < 0
 	})
 
-	// Calculate the largest CIDR block
-	minIP := ips[0]
-	maxIP := ips[len(ips)-1]
+	minIP := sortedIPs[0]
+	maxIP := sortedIPs[len(sortedIPs)-1]
 
 	// Convert minIP and maxIP to uint32 for calculations
 	minUint := ipToUint32(minIP)
 	maxUint := ipToUint32(maxIP)
 
 	// Calculate the CIDR prefix
+	prefixLen := calculatePrefixLength(minUint, maxUint)
+
+	// Return the CIDR block
+	return fmt.Sprintf("%s/%d", minIP.Mask(net.CIDRMask(prefixLen, 32)), prefixLen), nil
+}
+
+// calculatePrefixLength calculates the prefix length for a CIDR that contains both min and max IPs.
+func calculatePrefixLength(minUint, maxUint uint32) int {
 	prefixLen := 32
 	for prefixLen > 0 {
 		mask := uint32((1<<prefixLen)-1) << (32 - prefixLen)
@@ -77,10 +114,7 @@ func main() {
 		}
 		prefixLen--
 	}
-
-	// Print the largest CIDR block to stdout
-	cidr := fmt.Sprintf("%s/%d", minIP.Mask(net.CIDRMask(prefixLen, 32)), prefixLen)
-	fmt.Println(cidr)
+	return prefixLen
 }
 
 // debugLog prints debug messages to stderr with a yellow "debug:" prefix
